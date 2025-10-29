@@ -1,11 +1,8 @@
 pipeline {
     agent any
-    environment {
-        PYTHON_IMAGE = 'python:3.9-slim'
-        IMAGE_NAME = 'python-devsecops-jenkins_app'
-    }
+
     stages {
-        stage('Checkout') {
+        stage('Clone Repository') {
             steps {
                 checkout scm
             }
@@ -14,64 +11,59 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    sh 'python3 -m venv venv || true'
-                    sh './venv/bin/pip install -r requirements.txt || true'
+                    sh 'python3 -m venv venv'
+                    sh './venv/bin/pip install -r requirements.txt'
                 }
             }
         }
 
         stage('Run Tests') {
             steps {
-                script {
-                    sh './venv/bin/pytest || true'
-                }
+                echo 'Running tests inside Docker...'
+                sh 'docker compose run --rm web pytest -v'
             }
         }
 
-        stage('Static Code Analysis (Bandit)') {
+        stage('Static Analysis (Bandit)') {
             steps {
-                script {
-                    sh './venv/bin/bandit app.py || true'
-                }
+                echo 'Running Bandit static analysis...'
+                sh 'docker compose run --rm web bandit app.py || true'
             }
         }
 
-        stage('Container Vulnerability Scan (Trivy)') {
+        stage('Dependency Scan (Safety)') {
             steps {
-                script {
-                    sh 'docker-compose build || true'
-                    sh 'trivy image ${IMAGE_NAME}:latest || true'
-                }
+                echo 'Scanning dependencies with Safety...'
+                sh 'docker compose run --rm web safety scan -r requirements.txt || true'
             }
         }
 
-        stage('Check Dependency Vulnerabilities (Safety)') {
+        stage('Image Scan (Trivy)') {
             steps {
-                script {
-                    sh './venv/bin/safety check || true'
-                }
+                echo 'Scanning Docker image with Trivy...'
+                sh 'trivy image devsecops-lab-web || true'
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                script {
-                    sh 'docker-compose build || true'
-                }
+                echo 'Building Docker image...'
+                sh 'docker compose build'
             }
         }
 
         stage('Deploy Application') {
             steps {
-                script {
-                    sh 'docker-compose up -d || true'
-                }
+                echo 'Deploying application...'
+                sh 'docker compose up -d || true'
             }
         }
     }
+
     post {
         always {
-            cleanWs()
+            echo 'Pipeline finished — cleaning up containers.'
+            sh 'docker compose down || true'
         }
     }
 }

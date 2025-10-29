@@ -1,48 +1,88 @@
 pipeline {
     agent any
-
+    environment {
+        // Set up Python and Docker
+        PYTHON_IMAGE = 'python:3.9-slim'
+        IMAGE_NAME = 'python-devsecops-jenkins_app'
+    }
     stages {
-        stage('Clone Repository') {
+        stage('Checkout') {
             steps {
-                git 'https://github.com/mid-nom/devsecops-LAB2.git'
+                // Pull the code from GitHub
+                checkout scm
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Install Dependencies') {
             steps {
-                sh 'docker compose build'
+                script {
+                    // Install Python dependencies
+                    sh 'python3 -m venv venv'
+                    sh './venv/bin/pip install -r requirements.txt'
+                }
             }
         }
 
         stage('Run Tests') {
             steps {
-                sh 'docker compose run web pytest -v'
+                script {
+                    // Run the tests with pytest
+                    sh './venv/bin/pytest'
+                }
             }
         }
 
-        stage('Static Analysis (Bandit)') {
+        stage('Static Code Analysis (Bandit)') {
             steps {
-                sh 'docker compose run web bandit app.py || true'
+                script {
+                    // Run Bandit for static code analysis
+                    sh './venv/bin/bandit -r .'
+                }
             }
         }
 
-        stage('Dependency Scan (Safety)') {
+        stage('Container Vulnerability Scan (Trivy)') {
             steps {
-                sh 'docker compose run web safety scan -r requirements.txt || true'
+                script {
+                    // Build the Docker image
+                    sh 'docker-compose build'
+                    // Scan the image with Trivy
+                    sh 'trivy image ${IMAGE_NAME}:latest'
+                }
             }
         }
 
-        stage('Image Scan (Trivy)') {
+        stage('Check Dependency Vulnerabilities (Safety)') {
             steps {
-                sh 'trivy image devsecops-lab-web  || true'
+                script {
+                    // Run Safety to check dependencies
+                    sh './venv/bin/safety check'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // Build Docker image
+                    sh 'docker-compose build'
+                }
+            }
+        }
+
+        stage('Deploy Application') {
+            steps {
+                script {
+                    // Deploy the application using Docker Compose
+                    sh 'docker-compose up -d'
+                }
             }
         }
     }
-
     post {
         always {
-            echo 'Pipeline finished — cleaning up containers.'
-            sh 'docker compose down || true'
+            // Clean up after build
+            cleanWs()
         }
     }
 }

@@ -1,23 +1,24 @@
 pipeline {
     agent any
     environment {
-        IMAGE_NAME = 'devsecops-lab-web'
+        // Set up Python and Docker
+        PYTHON_IMAGE = 'python:3.9-slim'
+        IMAGE_NAME = 'python-devsecops-jenkins_app'
     }
-
     stages {
-
         stage('Checkout') {
             steps {
-                echo "Checking out repository..."
+                // Pull the code from GitHub
                 checkout scm
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Install Dependencies') {
             steps {
                 script {
-                    echo "Building Docker image..."
-                    sh 'sudo docker compose build'
+                    // Install Python dependencies
+                    sh 'python3 -m venv venv'
+                    sh './venv/bin/pip install -r requirements.txt'
                 }
             }
         }
@@ -25,53 +26,46 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    echo "Running tests inside Docker container..."
-                    sh 'sudo docker compose run web pytest -v'
+                    // Run the tests with pytest
+                    sh './venv/bin/pytest'
                 }
             }
         }
 
-        stage('Static Analysis (Bandit)') {
+        stage('Static Code Analysis (Bandit)') {
             steps {
                 script {
-                    echo "Running Bandit security scan..."
-                    def banditExit = sh(script: 'sudo docker compose run web bandit -r app.py -f html -o bandit-report.html', returnStatus: true)
-
-                    // Archive the Bandit report
-                    archiveArtifacts artifacts: 'bandit-report.html', fingerprint: true
-
-                    if (banditExit != 0) {
-                        echo "Bandit found issues! Check bandit-report.html."
-                        currentBuild.result = 'UNSTABLE'
-                    }
+                    // Run Bandit for static code analysis
+                    sh './venv/bin/bandit -r .'
                 }
             }
         }
 
-        stage('Dependency Scan (Safety)') {
+        stage('Container Vulnerability Scan (Trivy)') {
             steps {
                 script {
-                    echo "Running Safety dependency scan..."
-                    def safetyExit = sh(script: 'sudo docker compose run web safety check -r requirements.txt || true', returnStatus: true)
-                    
-                    if (safetyExit != 0) {
-                        echo "Safety found vulnerabilities."
-                        currentBuild.result = 'UNSTABLE'
-                    }
+                    // Build the Docker image
+                    sh 'docker-compose build'
+                    // Scan the image with Trivy
+                    sh 'trivy image ${IMAGE_NAME}:latest'
                 }
             }
         }
 
-        stage('Image Scan (Trivy)') {
+        stage('Check Dependency Vulnerabilities (Safety)') {
             steps {
                 script {
-                    echo "Scanning Docker image with Trivy..."
-                    def trivyExit = sh(script: "sudo trivy image ${IMAGE_NAME} || true", returnStatus: true)
+                    // Run Safety to check dependencies
+                    sh './venv/bin/safety check'
+                }
+            }
+        }
 
-                    if (trivyExit != 0) {
-                        echo "Trivy found vulnerabilities."
-                        currentBuild.result = 'UNSTABLE'
-                    }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // Build Docker image
+                    sh 'docker-compose build'
                 }
             }
         }
@@ -79,17 +73,15 @@ pipeline {
         stage('Deploy Application') {
             steps {
                 script {
-                    echo "Deploying application..."
-                    sh 'sudo docker compose up -d'
+                    // Deploy the application using Docker Compose
+                    sh 'docker-compose up -d'
                 }
             }
         }
     }
-
     post {
         always {
-            echo 'Pipeline finished — cleaning up Docker containers...'
-            sh 'sudo docker compose down || true'
+            // Clean up after build
             cleanWs()
         }
     }

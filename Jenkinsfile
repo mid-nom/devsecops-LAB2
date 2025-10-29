@@ -5,9 +5,10 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                // More robust Git checkout
+                echo "Checking out repository..."
                 checkout scm
             }
         }
@@ -15,7 +16,8 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    sh 'docker compose build'
+                    echo "Building Docker image..."
+                    sh 'sudo docker compose build'
                 }
             }
         }
@@ -23,8 +25,8 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    // Run tests inside the Docker container
-                    sh 'docker compose run web pytest -v'
+                    echo "Running tests inside Docker container..."
+                    sh 'sudo docker compose run web pytest -v'
                 }
             }
         }
@@ -32,8 +34,16 @@ pipeline {
         stage('Static Analysis (Bandit)') {
             steps {
                 script {
-                    // Run Bandit inside Docker; don't fail pipeline on warnings
-                    sh 'docker compose run web bandit app.py || true'
+                    echo "Running Bandit security scan..."
+                    def banditExit = sh(script: 'sudo docker compose run web bandit -r app.py -f html -o bandit-report.html', returnStatus: true)
+
+                    // Archive the Bandit report
+                    archiveArtifacts artifacts: 'bandit-report.html', fingerprint: true
+
+                    if (banditExit != 0) {
+                        echo "Bandit found issues! Check bandit-report.html."
+                        currentBuild.result = 'UNSTABLE'
+                    }
                 }
             }
         }
@@ -41,8 +51,13 @@ pipeline {
         stage('Dependency Scan (Safety)') {
             steps {
                 script {
-                    // Run Safety inside Docker; don't fail pipeline on warnings
-                    sh 'docker compose run web safety check -r requirements.txt || true'
+                    echo "Running Safety dependency scan..."
+                    def safetyExit = sh(script: 'sudo docker compose run web safety check -r requirements.txt || true', returnStatus: true)
+                    
+                    if (safetyExit != 0) {
+                        echo "Safety found vulnerabilities."
+                        currentBuild.result = 'UNSTABLE'
+                    }
                 }
             }
         }
@@ -50,8 +65,13 @@ pipeline {
         stage('Image Scan (Trivy)') {
             steps {
                 script {
-                    // Scan Docker image with Trivy; don't fail pipeline on warnings
-                    sh "trivy image ${IMAGE_NAME} || true"
+                    echo "Scanning Docker image with Trivy..."
+                    def trivyExit = sh(script: "sudo trivy image ${IMAGE_NAME} || true", returnStatus: true)
+
+                    if (trivyExit != 0) {
+                        echo "Trivy found vulnerabilities."
+                        currentBuild.result = 'UNSTABLE'
+                    }
                 }
             }
         }
@@ -59,7 +79,8 @@ pipeline {
         stage('Deploy Application') {
             steps {
                 script {
-                    sh 'docker compose up -d'
+                    echo "Deploying application..."
+                    sh 'sudo docker compose up -d'
                 }
             }
         }
@@ -67,8 +88,9 @@ pipeline {
 
     post {
         always {
-            echo 'Pipeline finished — cleaning up containers.'
-            sh 'docker compose down || true'
+            echo 'Pipeline finished — cleaning up Docker containers...'
+            sh 'sudo docker compose down || true'
+            cleanWs()
         }
     }
 }

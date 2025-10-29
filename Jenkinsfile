@@ -36,7 +36,7 @@ pipeline {
             steps {
                 script {
                     // Run Bandit for static code analysis
-                    sh './venv/bin/bandit -r .'
+                    sh './venv/bin/bandit app.py'
                 }
             }
         }

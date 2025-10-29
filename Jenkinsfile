@@ -1,8 +1,6 @@
 pipeline {
     agent any
     environment {
-        // Set up Python and Docker
-        PYTHON_IMAGE = 'python:3.9-slim'
         IMAGE_NAME = 'python-devsecops-jenkins_app'
     }
     stages {
@@ -16,9 +14,12 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    // Install Python dependencies
+                    // Create virtual environment
                     sh 'python3 -m venv venv'
-                    sh './venv/bin/pip install -r requirements.txt'
+                    // Upgrade pip
+                    sh './venv/bin/pip install --upgrade pip'
+                    // Install Python dependencies + dev/security tools
+                    sh './venv/bin/pip install -r requirements.txt bandit safety'
                 }
             }
         }
@@ -27,7 +28,7 @@ pipeline {
             steps {
                 script {
                     // Run the tests with pytest
-                    sh './venv/bin/pytest'
+                    sh './venv/bin/pytest -v'
                 }
             }
         }
@@ -41,21 +42,10 @@ pipeline {
             }
         }
 
-        stage('Container Vulnerability Scan (Trivy)') {
-            steps {
-                script {
-                    // Build the Docker image
-                    sh 'docker-compose build'
-                    // Scan the image with Trivy
-                    sh 'trivy image ${IMAGE_NAME}:latest'
-                }
-            }
-        }
-
         stage('Check Dependency Vulnerabilities (Safety)') {
             steps {
                 script {
-                    // Run Safety to check dependencies
+                    // Run Safety to check Python dependencies
                     sh './venv/bin/safety check'
                 }
             }
@@ -64,8 +54,17 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Build Docker image
+                    // Build the Docker image once
                     sh 'docker-compose build'
+                }
+            }
+        }
+
+        stage('Container Vulnerability Scan (Trivy)') {
+            steps {
+                script {
+                    // Scan the Docker image with Trivy
+                    sh "trivy image ${IMAGE_NAME}:latest"
                 }
             }
         }
@@ -81,7 +80,7 @@ pipeline {
     }
     post {
         always {
-            // Clean up after build
+            // Clean workspace after build
             cleanWs()
         }
     }
